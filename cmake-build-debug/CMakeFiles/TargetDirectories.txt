@@ -1,3 +1,0 @@
-/mnt/c/Users/wnadu/workspace/clox/cmake-build-debug/CMakeFiles/clox.dir
-/mnt/c/Users/wnadu/workspace/clox/cmake-build-debug/CMakeFiles/edit_cache.dir
-/mnt/c/Users/wnadu/workspace/clox/cmake-build-debug/CMakeFiles/rebuild_cache.dir
