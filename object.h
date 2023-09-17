@@ -5,6 +5,7 @@
 #ifndef CLOX_OBJECT_H
 #define CLOX_OBJECT_H
 
+#include <stdint.h>
 #include "value.h"
 
 #define OBJ_TYPE(value) (AS_OBJ(value)->type)
@@ -27,6 +28,7 @@ struct ObjString {
     Obj obj;
     int length;
     char *chars;
+    uint32_t hash;
 };
 
 static inline bool isObjType(Value value, ObjType type) {

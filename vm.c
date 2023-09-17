@@ -35,10 +35,15 @@ static void runtimeError(const char *format, ...) {
 
 void initVM() {
     resetStack();
+    vm.objects = NULL;
+    initTable(&vm.strings);
+    initTable(&vm.globals);
 }
 
 void freeVM() {
     freeObjects();
+    freeTable(&vm.strings);
+    freeTable(&vm.globals);
 }
 
 static Value peek(int distance) {
@@ -52,6 +57,7 @@ static bool isFalsey(Value value) {
 static InterpretResult run() {
 #define READ_BYTE() (*vm.ip++)
 #define READ_CONSTANT() (vm.chunk->constants.values[READ_BYTE()])
+#define READ_STRING() AS_STRING(READ_CONSTANT())
 #define BINARY_OP(valueType, op) \
     do {              \
         if(!IS_NUMBER(peek(0)) || !IS_NUMBER(peek(1))) { \
@@ -136,14 +142,57 @@ static InterpretResult run() {
                 BINARY_OP(BOOL_VAL, <);
                 break;
             case OP_RETURN: {
+                return INTERPRET_OK;
+            }
+            case OP_POP: {
+                pop();
+                break;
+            }
+            case OP_PRINT: {
                 printValue(pop());
                 printf("\n");
-                return INTERPRET_OK;
+                break;
+            }
+            case OP_DEFINE_GLOBAL: {
+                ObjString *key = READ_STRING();
+                tableSet(&vm.globals, key, peek(0));
+                pop();
+                break;
+            }
+            case OP_GET_GLOBAL: {
+                ObjString *key = READ_STRING();
+                Value value;
+                if (!tableGet(&vm.globals, key, &value)) {
+                    runtimeError("Undefined variable '%s'.", key->chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                push(value);
+                break;
+            }
+            case OP_SET_GLOBAL: {
+                ObjString *key = READ_STRING();
+                if (tableSet(&vm.globals, key, peek(0))) {
+                    tableDelete(&vm.globals, key);
+                    runtimeError("Undefined variable '%s'.", key->chars);
+                    return INTERPRET_RUNTIME_ERROR;
+                }
+                break;
+            }
+            case OP_GET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                push(vm.stack[slot]);
+                break;
+            }
+            case OP_SET_LOCAL: {
+                uint8_t slot = READ_BYTE();
+                vm.stack[slot] = peek(0);
+                break;
             }
         }
     }
 #undef BINARY_OP
 #undef READ_CONSTANT
+#undef READ_STRING
 #undef READ_BYTE
 }
 
