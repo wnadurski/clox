@@ -18,6 +18,11 @@ typedef struct {
     bool panicMode;
 } Parser;
 
+static void and_(bool canAssign);
+
+static void or_(bool canAssign);
+
+static int emitJump(uint8_t instruction);
 
 typedef enum {
     PREC_NONE,
@@ -121,6 +126,16 @@ static void emitBytes(uint8_t byte1, uint8_t byte2) {
     emitByte(byte2);
 }
 
+static void emitLoop(int loopStart) {
+    emitByte(OP_LOOP);
+
+    int offset = currentChunk()->count - loopStart + 2;
+    if (offset > UINT16_MAX) error("Loop body too large.");
+
+    emitByte((offset >> 8) & 0xff);
+    emitByte(offset & 0xff);
+}
+
 static void emitReturn() {
     emitByte(OP_RETURN);
 }
@@ -221,6 +236,7 @@ static void number(bool canAssign) {
     double value = strtod(parser.previous.start, NULL);
     emitConstant(NUMBER_VAL(value));
 }
+
 
 static void string(bool canAssign) {
     emitConstant(OBJ_VAL(
@@ -354,7 +370,7 @@ ParseRule rules[] = {
         [TOKEN_IDENTIFIER]    = {variable, NULL, PREC_NONE},
         [TOKEN_STRING]        = {string, NULL, PREC_NONE},
         [TOKEN_NUMBER]        = {number, NULL, PREC_NONE},
-        [TOKEN_AND]           = {NULL, NULL, PREC_NONE},
+        [TOKEN_AND]           = {NULL, and_, PREC_AND},
         [TOKEN_CLASS]         = {NULL, NULL, PREC_NONE},
         [TOKEN_ELSE]          = {NULL, NULL, PREC_NONE},
         [TOKEN_FALSE]         = {literal, NULL, PREC_NONE},
@@ -362,7 +378,7 @@ ParseRule rules[] = {
         [TOKEN_FUN]           = {NULL, NULL, PREC_NONE},
         [TOKEN_IF]            = {NULL, NULL, PREC_NONE},
         [TOKEN_NIL]           = {literal, NULL, PREC_NONE},
-        [TOKEN_OR]            = {NULL, NULL, PREC_NONE},
+        [TOKEN_OR]            = {NULL, or_, PREC_OR},
         [TOKEN_PRINT]         = {NULL, NULL, PREC_NONE},
         [TOKEN_RETURN]        = {NULL, NULL, PREC_NONE},
         [TOKEN_SUPER]         = {NULL, NULL, PREC_NONE},
@@ -386,6 +402,21 @@ static void printStatement() {
     expression();
     consume(TOKEN_SEMICOLON, "Expect ';' after a value.");
     emitByte(OP_PRINT);
+}
+
+static void whileStatement() {
+    int loopStart = currentChunk()->count;
+    consume(TOKEN_LEFT_PAREN, "Expect '(' after 'while'.");
+    expression();
+    consume(TOKEN_RIGHT_PAREN, "Expect ')' after condition.");
+    int exitJump = emitJump(OP_JUMP_IF_FALSE);
+    emitByte(OP_POP);
+
+    statement();
+    emitLoop(loopStart);
+
+    patchJump(exitJump);
+    emitByte(OP_POP);
 }
 
 static void expressionStatement() {
@@ -422,6 +453,8 @@ static void statement() {
 
     } else if (match(TOKEN_IF)) {
         ifStatement();
+    } else if (match(TOKEN_WHILE)) {
+        whileStatement();
     } else if (match(TOKEN_LEFT_BRACE)) {
         beginScope();
         block();
@@ -438,6 +471,13 @@ static int emitJump(uint8_t instruction) {
     return currentChunk()->count - 2;
 }
 
+//0 OP_POP
+//1 OP_JUMP
+//2 byte
+//3 byte
+//4 OP_TRUE
+//5 OP_FALSE
+//
 
 static void patchJump(int offset) {
     int jump = currentChunk()->count - offset - 2;
@@ -537,7 +577,7 @@ static uint8_t parseVariable(const char *errorMessage) {
     consume(TOKEN_IDENTIFIER, errorMessage);
 
     declareVariable();
-    if (current->scopeDepth >= 0) return 0;
+    if (current->scopeDepth > 0) return 0;
 
     return identifierConstant(&parser.previous);
 }
@@ -552,6 +592,36 @@ static void defineVariable(uint8_t global) {
         return;
     }
     emitBytes(OP_DEFINE_GLOBAL, global);
+}
+
+
+static void and_(bool canAssign) {
+    int endJump = emitJump(OP_JUMP_IF_FALSE);
+
+    emitByte(OP_POP);
+
+    parsePrecedence(PREC_AND);
+
+    patchJump(endJump);
+}
+//
+//0 OP_TRUE / OP_FALSE
+//1 OP_JUMP_IF_FALSE 4
+//2 OP_JUMP 5
+//3 OP_FALSE
+//4 OP_POP
+//5
+//
+
+static void or_(bool canAssign) {
+    int elseJump = emitJump(OP_JUMP_IF_FALSE);
+    int endJump = emitJump(OP_JUMP);
+
+    patchJump(elseJump);
+    emitByte(OP_POP);
+
+    parsePrecedence(PREC_OR);
+    patchJump(endJump);
 }
 
 static void varDeclaration() {
